@@ -1,16 +1,73 @@
 from flask import Flask, request, render_template_string
-import os
+import re, os, datetime
 
 app = Flask(__name__)
 
-INDEX_HTML = "<h1>Hello World</h1>"
-RESULT_HTML = "<h1>Result Page</h1>"
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# 🔹 Patterns
+PATTERNS = {
+    "EMAIL": r"[\w\.-]+@[\w\.-]+\.\w+",
+    "PHONE": r"\b\d{10,15}\b",
+    "SSN": r"\b\d{3}-\d{2}-\d{4}\b",
+    "MRN": r"\bMRN\d{5,10}\b"
+}
+
+def scan_text(text):
+    findings = []
+    for name, pattern in PATTERNS.items():
+        matches = re.findall(pattern, text)
+        if matches:
+            findings.append({name: matches})
+    return findings
+
+def log_to_file(findings):
+    with open("alerts.log", "a") as f:
+        f.write(f"{datetime.datetime.now()} - {findings}\n")
+
+# 🔹 HTML Templates
+INDEX_HTML = """
+<h2>Upload File for DLP Scan</h2>
+<form method="post" enctype="multipart/form-data">
+    <input type="file" name="file">
+    <button type="submit">Scan</button>
+</form>
+"""
+
+RESULT_HTML = """
+<h2>DLP Scan Results</h2>
+{% if findings %}
+    <h3>Sensitive Data Found!</h3>
+    {% for item in findings %}
+        <p>{{ item }}</p>
+    {% endfor %}
+{% else %}
+    <p>No sensitive data detected.</p>
+{% endif %}
+<a href="/">Scan another file</a>
+"""
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        return render_template_string(RESULT_HTML)
+        file = request.files["file"]
+        if file:
+            filepath = os.path.join(UPLOAD_FOLDER, file.filename)
+            file.save(filepath)
+
+            with open(filepath, "r") as f:
+                content = f.read()
+
+            findings = scan_text(content)
+
+            if findings:
+                log_to_file(findings)
+
+            return render_template_string(RESULT_HTML, findings=findings)
+
     return render_template_string(INDEX_HTML)
 
+import os
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
